@@ -1,0 +1,272 @@
+---
+title: "Putting R models into production using microservices"
+output: html_notebook
+---
+
+## Video Outlines:
+
+-   Pt. 1 The concepts
+-   Pt. 2 Making functions
+-   Pt. 3 Turning your functions into an API
+-   Pt. 4 Calling your own API
+-   Pt. 5 Deploy to RStudio Connect
+
+# Pt. 1 - The conceptual bits
+
+## The scenario:
+
+You've made a model in R and you want to enable other systems to use your model in production.
+
+How do you put the model in production?
+
+## The challenge:
+
+Other tools and systems that will leverage your model will not know R or be able to call it directly.
+
+## The Solution:
+
+Creating a REST API that serves predictions from your model.
+
+## Okay, but what is an API?
+
+-   Application Programming Interface
+
+-   A way for computers to talk to other computers
+
+-   RESTful APIs speak with HTTP
+
+    -   Hyper text transfer protocol (the thing the internet uses)
+
+    -   Think of HTTP as a universal language
+
+### Why an API, though?
+
+-   Most---if not all software languages---speak HTTP
+
+-   No care for what is "under the hood"
+
+-   You can make changes to the model without affecting the other systems using it
+
+    -   Unless you change the output format or other breaking changes
+
+## Anatomy of an API:
+
+-   Host (fixed) e.g. `https://api.hostname.com/`
+
+-   Endpoint (varied) e.g. `https://api.hostname.com/endpoint`
+
+    -   Endpoints are like a function
+    -   Determines what will happen
+
+-   Parameters (optional) e.g. `https://api.hostname.com/endpoint/?param=value`
+
+    -   Think of these like function arguments
+    -   Addresses varying parts of a request
+
+## Types of API requests:
+
+-   Each API endpoint has a different request **method**
+
+-   **GET** requests are used to retrieve data
+
+    -   Takes parameters only
+    -   All information is contained in the URL
+    -   (Don't send sensitive information via GET!)
+
+-   **POST** requests are used for sending data (files, text, data, etc.)
+
+    -   Can be used for creating or modifying something.
+
+    -   Very flexible request type
+
+-   Other methods that are used:
+
+    -   PUT
+    -   DELETE (yikes!)
+    -   HEAD
+    -   PATCH
+    -   and more...
+
+# Pt. 2 - Making functions
+
+## How can I do this in R?
+
+Plumber, that is how.
+
+-   Plumber turns an R function into an API.
+-   It uses special code comments---like {roxygen2}---to turn the functions into API endpoints
+
+## Function review
+
+-   Functions are code shortcuts
+
+-   A special kind of object
+
+-   Use arguments as placeholders
+
+-   Whatever is printed last is returned
+
+    ```{r}
+    my_fun <- function(argument) {
+      # do something with the argument
+      argument
+    }
+
+    my_fun("Spits out whatever it is given")
+    ```
+
+-   Remember how I said you can think of API parameters like function arguments? `r emo::ji("smirk")`
+
+## Creating useful functions
+
+-   Identify the values that will be changing or up to the users discretion
+-   We're going to use some data from the Boston Area Research Initiative [(BARI)](https://cssh.northeastern.edu/bari/) for an example
+
+```{r, message=FALSE}
+library(tidyverse)
+
+acs_url <- "https://raw.githubusercontent.com/JosiahParry/uitk/master/data-raw/acs_edu.csv"
+
+acs_edu <- read_csv(acs_url)
+
+filter(acs_edu, med_house_income > 90000)
+```
+
+-   Things that change should become arguments
+-   For example filtering the dataset based on median household income:
+
+```{r}
+filter_acs <- function(min_house_inc) {
+  
+  # min_house_inc acts as a placeholder
+  # passes the value into the filter function
+  filter(acs_edu, med_house_income > min_house_inc)
+
+  }
+
+# call the function
+filter_acs(225000)
+```
+
+## Model prediction function
+
+-   In the case of models, this will be prediction inputs
+
+-   Take `predict()` for linear models the arguments are:
+
+    -   `predict(object, newdata)`
+    -   In this case what will change is `newdata`
+
+-   We will first need to create the model
+
+-   Example model will be predicting median household income based on the bachelor degree attainment rate and how white a census tract is.
+
+```{r}
+housing_model <- lm(med_house_income ~ bach + white, data = acs_edu)
+
+summary(housing_model)
+```
+
+-   We've got a model, but now we need to make predictions.
+
+    -   To make predictions the `predict()` function will need a data frame to predict against.
+
+```{r}
+to_predict <- data.frame(bach = .75, white = .5)
+
+predict(housing_model, to_predict)
+```
+
+-   We want to easily make predictions for different values of `bach` and `white`.
+
+    -   `bach` and `white` are the values which will change and as such should become the `arguments`
+
+-   To make a prediction function:
+
+    1.  copy and paste the above lines of code into the function **body**---the part between the curly braces.
+    2.  Replace the hard coded values with the function argument names
+
+```{r}
+pred_income <- function(bach_edu_rate, prop_white) {
+  
+  # create data frame to predict against
+  to_predict <- data.frame(bach = bach_edu_rate, white = prop_white)
+
+  # create prediction
+  predict(housing_model, to_predict)
+}
+```
+
+-   Now we've got a function to use! Let's try it out.
+
+```{r}
+pred_income(.75, .5)
+```
+
+# Pt. 3 - Making an API with plumber
+
+## Outline:
+
+-   Now that we have the ability to create a function that serves predictions from a model we will be able to create the API
+
+-   The process to build the API will consist of:
+
+    1.  Serializing the model (saving it as a file)
+    2.  Creating a `plumber.R` file
+    3.  Define model prediction endpoint
+    4.  Serve the API
+
+## Building a simple API endpoint
+
+-   With your prediction function, you're 90% of the way there to making the API
+-   The final API looks like
+
+```{r}
+library(plumber)
+
+housing_model <- readr::read_rds("housing-model.rds")  
+
+#* @apiTitle Boston Median Household Income Prediction
+
+#* @apiDescription Predict the median household income of a census tract based in the Bachelor's degree attainment rate and the racial diversity.
+
+#* @param bach_edu_rate Bachelor's degree attainment rate of a census tract. Between 0 and 1.
+#* @param prop_white The proportion of the population that identifies as white. Between 0 and 1.
+
+#* @get /median-income
+function(bach_edu_rate = 0, prop_white = 0) {
+  
+  to_predict <- data.frame(bach = as.numeric(bach_edu_rate),
+                           white = as.numeric(prop_white))
+  
+  predict(housing_model, to_predict)
+}
+```
+
+-   Let's work backwards from here
+
+## Anatomy of a Plumber API
+
+-   Uses roxygen-like commenting `#*` to document
+
+-   `#*` is followed by **tags**
+
+-   Tags look like `@tagName`
+
+-   End points are defined by the appropriate method tag and endpoint name
+
+    -   e.g. `@get /predict`
+
+-   Endpoint functionality is defined by an unassigned function immediately following the endpoint name
+
+-   Code outside of a function can be considered **global**
+
+-   
+
+------------------------------------------------------------------------
+
+Now that you've created a model it needs to be saved as a serialized R object. You can do this with the function `readr::write_rds()` .
+
+```{r, eval=FALSE}
+write_rds(housing_model, "housing-model.rds")
+```
