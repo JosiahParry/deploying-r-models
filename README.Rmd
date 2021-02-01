@@ -1,14 +1,14 @@
 ---
-title: "Putting R models into production using microservices"
-output: html_notebook
+title: "Putting R models into production"
+output: github_document
 ---
 
-## Video Outlines:
+## Videos:
 
--   Pt. 1 The concepts
--   Pt. 2 Making functions
--   Pt. 3 Turning your functions into an API
--   Pt. 4 Calling your own API
+-   [Pt. 1 The concepts](https://www.youtube.com/watch?v=w4yHEQWct20&list=PLL9TGqB5UVHtC3V5Qhw_RY9UXiE6rCC8Q&index=1&ab_channel=JosiahParry)
+-   [Pt. 2 Making functions](https://www.youtube.com/watch?v=Iqzu5SLpOeg&list=PLL9TGqB5UVHtC3V5Qhw_RY9UXiE6rCC8Q&index=2&t=481s&ab_channel=JosiahParry)
+-   [Pt. 3 Turning your functions into an API](https://www.youtube.com/watch?v=oPC5OTeQYgw&feature=youtu.be&ab_channel=JosiahParry)
+-   [Pt. 4 Calling your own API](https://youtu.be/NywS_eYCWPk)
 -   Pt. 5 Deploy to RStudio Connect
 
 # Pt. 1 - The conceptual bits
